@@ -82,6 +82,47 @@ def test_check_schema_rejects_unsupported_revisions(revisions):
     assert exc_info.value.revisions == revisions
 
 
+# FND-07 success path and the FND-08 2 s query bound
+
+
+class _RecordingResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return iter(self._rows)
+
+
+class _RecordingConnection:
+    def __init__(self, rows):
+        self._rows = rows
+        self.statements = []
+
+    def execute(self, statement, *args, **kwargs):
+        self.statements.append(str(statement))
+        return _RecordingResult(self._rows)
+
+
+class _RecordingEngine:
+    def __init__(self, rows):
+        self.connection = _RecordingConnection(rows)
+
+    @contextmanager
+    def connect(self):
+        yield self.connection
+
+
+@pytest.mark.parametrize("rows", [["0009"], ["0009", "0010"]])
+def test_reader_bounds_query_to_2s_and_returns_revision_rows(rows):
+    engine = _RecordingEngine(rows)
+
+    assert read_schema_revisions(engine) == rows
+    assert engine.connection.statements == [
+        "SET LOCAL statement_timeout = '2s'",
+        "SELECT version_num FROM alembic_version",
+    ]
+
+
 # FND-08, FND-09 and the missing-grant edge case
 
 
