@@ -39,6 +39,13 @@ def test_engine_kwargs_enable_read_only_timeout_and_fixed_pool(settings):
     assert kwargs["max_overflow"] == 0
 
 
+# Edge case: the DB comes back after an outage (stale pooled connections)
+
+
+def test_engine_kwargs_pre_ping_pooled_connections(settings):
+    assert engine_kwargs(settings)["pool_pre_ping"] is True
+
+
 def test_engine_pool_matches_db_pool_size_without_overflow(settings):
     engine = create_db_engine(settings)
 
