@@ -383,3 +383,49 @@ def test_env_sample_states_the_defaults_explicitly():
         if isinstance(expected, bool):
             expected = str(expected).lower()
         assert values[name] == str(expected), name
+
+
+# --- FND-27 Makefile ---
+
+MAKEFILE = ROOT / "Makefile"
+
+
+def make_targets() -> set[str]:
+    return set(re.findall(r"^([\w-]+)\s*:", MAKEFILE.read_text(), re.MULTILINE))
+
+
+def make_recipe(target: str) -> str:
+    match = re.search(
+        rf"^{target}\s*:[^\n]*\n(?P<recipe>(?:\t[^\n]*\n?)*)",
+        MAKEFILE.read_text(),
+        re.MULTILINE,
+    )
+    assert match, f"target {target} not found"
+    return match["recipe"].strip()
+
+
+def test_makefile_declares_install_run_test_and_lint_targets():
+    assert {"install", "run", "test", "lint"} <= make_targets()
+
+
+def test_makefile_targets_run_the_designed_commands():
+    assert make_recipe("install") == "uv sync"
+    assert make_recipe("test") == "uv run pytest -n auto"
+    assert make_recipe("lint") == "uv run pre-commit run --all-files"
+
+
+def test_makefile_run_starts_uvicorn_factory_with_reload():
+    recipe = make_recipe("run")
+
+    assert "uvicorn my_finance_ai.main:create_app" in recipe
+    assert "--factory" in recipe
+    assert "--reload" in recipe
+
+
+def test_makefile_declares_targets_as_phony():
+    phony = re.search(
+        r"^\.PHONY\s*:(?P<names>[^\n]*)", MAKEFILE.read_text(), re.M
+    )
+
+    assert phony
+    assert {"install", "run", "test", "lint"} <= set(phony["names"].split())
