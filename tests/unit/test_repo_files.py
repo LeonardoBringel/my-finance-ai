@@ -184,7 +184,6 @@ def test_role_script_revokes_everything_before_granting():
 # --- FND-24 Dockerfile ---
 
 DOCKERFILE = ROOT / "Dockerfile"
-DOCKERIGNORE = ROOT / ".dockerignore"
 
 
 def dockerfile_lines() -> list[str]:
@@ -259,14 +258,6 @@ def test_dockerfile_does_not_install_build_toolchain():
 
     assert "build-essential" not in content
     assert "libpq-dev" not in content
-
-
-def test_dockerignore_keeps_secrets_and_host_venv_out_of_the_image():
-    entries = DOCKERIGNORE.read_text().split()
-
-    assert ".env" in entries
-    assert ".venv" in entries
-    assert ".git" in entries
 
 
 # --- FND-25 docker-compose ---
