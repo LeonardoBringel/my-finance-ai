@@ -3,8 +3,14 @@
 import json
 import re
 from pathlib import Path
+from typing import get_args
 
+import pytest
 import yaml
+from cryptography.fernet import Fernet
+from pydantic import SecretStr
+
+from my_finance_ai.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -310,3 +316,70 @@ def test_compose_restarts_service_unless_stopped():
 
     assert service["restart"] == "unless-stopped"
     assert service["container_name"] == "my-finance-ai"
+
+
+# FND-26 .env.sample
+
+ENV_SAMPLE = ROOT / ".env.sample"
+SECRET_PLACEHOLDERS = ("", "change-me")
+
+
+def env_sample() -> dict[str, str]:
+    """Variables of `.env.sample`, ignoring blank lines and comments."""
+    values = {}
+    for line in ENV_SAMPLE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        assert separator, line
+        assert name not in values, f"duplicated variable {name}"
+        values[name.strip()] = value.strip()
+    return values
+
+
+def secret_fields() -> set[str]:
+    return {
+        name
+        for name, field in Settings.model_fields.items()
+        if SecretStr in get_args(field.annotation)
+        or field.annotation is SecretStr
+    }
+
+
+def test_env_sample_lists_exactly_the_settings_variables():
+    assert set(env_sample()) == set(Settings.model_fields)
+
+
+def test_env_sample_secrets_are_empty_or_placeholders():
+    secrets = secret_fields()
+    values = env_sample()
+
+    assert secrets >= {
+        "DB_PASSWORD",
+        "FERNET_KEY",
+        "AI_JWT_SECRET",
+        "GOOGLE_API_KEY",
+        "LANGFUSE_SECRET_KEY",
+    }
+    for name in secrets:
+        assert values[name] in SECRET_PLACEHOLDERS, name
+
+
+def test_env_sample_fernet_key_is_not_a_valid_key():
+    value = env_sample()["FERNET_KEY"]
+
+    with pytest.raises((ValueError, TypeError)):
+        Fernet(value)
+
+
+def test_env_sample_states_the_defaults_explicitly():
+    values = env_sample()
+
+    for name, field in Settings.model_fields.items():
+        if field.is_required() or field.default is None:
+            continue
+        expected = field.default
+        if isinstance(expected, bool):
+            expected = str(expected).lower()
+        assert values[name] == str(expected), name
