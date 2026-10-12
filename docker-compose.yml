@@ -1,0 +1,22 @@
+services:
+  my-finance-ai:
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-latest}
+    container_name: my-finance-ai
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      TZ: America/Sao_Paulo
+      UV_NO_SYNC: "1"
+    networks:
+      - finance_net
+
+networks:
+  finance_net:
+    external: true
+    name: my-finance_finance_net

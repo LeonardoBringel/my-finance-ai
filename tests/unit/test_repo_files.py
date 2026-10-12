@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -259,3 +261,52 @@ def test_dockerignore_keeps_secrets_and_host_venv_out_of_the_image():
     assert ".env" in entries
     assert ".venv" in entries
     assert ".git" in entries
+
+
+# --- FND-25 docker-compose ---
+
+COMPOSE = ROOT / "docker-compose.yml"
+
+
+def compose() -> dict:
+    return yaml.safe_load(COMPOSE.read_text())
+
+
+def test_compose_publishes_no_port_on_any_service():
+    services = compose()["services"]
+
+    assert services
+    for name, service in services.items():
+        assert "ports" not in service, name
+
+
+def test_compose_joins_the_external_my_finance_network():
+    config = compose()
+    service = config["services"]["my-finance-ai"]
+
+    assert "finance_net" in service["networks"]
+    assert config["networks"]["finance_net"] == {
+        "external": True,
+        "name": "my-finance_finance_net",
+    }
+
+
+def test_compose_sets_sao_paulo_timezone():
+    service = compose()["services"]["my-finance-ai"]
+
+    assert service["environment"]["TZ"] == "America/Sao_Paulo"
+
+
+def test_compose_points_the_service_at_the_my_finance_database():
+    service = compose()["services"]["my-finance-ai"]
+
+    assert service["environment"]["DB_HOST"] == "db"
+    assert str(service["environment"]["DB_PORT"]) == "5432"
+    assert service["env_file"] in (".env", [".env"])
+
+
+def test_compose_restarts_service_unless_stopped():
+    service = compose()["services"]["my-finance-ai"]
+
+    assert service["restart"] == "unless-stopped"
+    assert service["container_name"] == "my-finance-ai"
