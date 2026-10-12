@@ -1,5 +1,6 @@
 """Static checks on repository files (FND-18 to FND-23)."""
 
+import json
 import re
 from pathlib import Path
 
@@ -170,3 +171,91 @@ def test_role_script_revokes_everything_before_granting():
     first_grant = grants()[0].start()
     assert revoke_tables.start() < first_grant
     assert revoke_sequences.start() < first_grant
+
+
+# --- FND-24 Dockerfile ---
+
+DOCKERFILE = ROOT / "Dockerfile"
+DOCKERIGNORE = ROOT / ".dockerignore"
+
+
+def dockerfile_lines() -> list[str]:
+    """Instructions, with `\\` continuations joined and comments removed."""
+    text = DOCKERFILE.read_text().replace("\\\n", " ")
+    lines = [line.strip() for line in text.splitlines()]
+    return [line for line in lines if line and not line.startswith("#")]
+
+
+def dockerfile_cmd() -> list[str]:
+    cmd = [line for line in dockerfile_lines() if line.startswith("CMD ")]
+    assert len(cmd) == 1
+    return json.loads(cmd[0].removeprefix("CMD "))
+
+
+def test_dockerfile_uses_python_313_slim_base():
+    assert dockerfile_lines()[0] == "FROM python:3.13-slim"
+
+
+def test_dockerfile_installs_locked_runtime_dependencies_with_uv():
+    installs = [line for line in dockerfile_lines() if "uv sync" in line]
+
+    assert installs
+    for line in installs:
+        assert "--frozen" in line
+        assert "--no-dev" in line
+    assert any("uv sync --frozen --no-dev" in line for line in installs)
+
+
+def test_dockerfile_pins_uv_image_to_0_13_0():
+    uv_images = [
+        line
+        for line in dockerfile_lines()
+        if line.startswith("COPY --from=") and "astral-sh/uv" in line
+    ]
+
+    assert len(uv_images) == 1
+    assert "ghcr.io/astral-sh/uv:0.13.0 " in uv_images[0]
+
+
+def test_dockerfile_cmd_runs_uvicorn_with_one_worker_on_port_8000():
+    cmd = " ".join(dockerfile_cmd())
+
+    assert "uvicorn" in cmd
+    assert "my_finance_ai.main:create_app" in cmd
+    assert "--factory" in cmd
+    assert re.search(r"--workers\s+1\b", cmd) or "--workers=1" in cmd
+    assert re.search(r"--port\s+8000\b", cmd) or "--port=8000" in cmd
+
+
+def test_dockerfile_runs_as_non_root_user():
+    users = [line for line in dockerfile_lines() if line.startswith("USER ")]
+
+    assert users
+    assert users[-1] not in {"USER root", "USER 0"}
+
+
+def test_dockerfile_healthcheck_probes_health_without_curl():
+    health = [
+        line
+        for line in dockerfile_lines()
+        if line.startswith("HEALTHCHECK") or "/health" in line
+    ]
+
+    assert any("/health" in line for line in health)
+    assert any("urllib.request" in line for line in health)
+    assert not any("curl" in line for line in dockerfile_lines())
+
+
+def test_dockerfile_does_not_install_build_toolchain():
+    content = DOCKERFILE.read_text()
+
+    assert "build-essential" not in content
+    assert "libpq-dev" not in content
+
+
+def test_dockerignore_keeps_secrets_and_host_venv_out_of_the_image():
+    entries = DOCKERIGNORE.read_text().split()
+
+    assert ".env" in entries
+    assert ".venv" in entries
+    assert ".git" in entries
